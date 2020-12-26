@@ -2,4 +2,4 @@
   tasks:
     - name: Rescanning nextcloud filesystem
       shell:
-        cmd: 'docker exec --user www-data {{ docker_config.nextcloud_fpm_container_name }} php occ files:scan --all' 
+        cmd: 'docker exec --user www-data {{ nextcloud_conainer_name }} php occ files:scan --all' 

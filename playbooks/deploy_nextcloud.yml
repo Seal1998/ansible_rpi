@@ -120,6 +120,7 @@
         container_name: '{{ mariadb_container_name }}'
         write_to: mariadb_address
       tags:
+        - mariadb_ready
         - mariadb
 
 # if mariadb undeployed - can`t get IP
@@ -159,6 +160,7 @@
             - 'FLUSH PRIVILEGES'
       tags:
         - mariadb
+        - mariadb_ready
         - mysql_init
 
     - name: Setting nextcloud volumes to mount
