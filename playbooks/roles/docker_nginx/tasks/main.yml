@@ -1,0 +1,40 @@
+- name: Stopping and removing existing nginx container
+  docker_container:
+    name: '{{ nginx_container_name }}'
+    state: absent
+  tags:
+    - deploy
+    - undeploy
+
+- name: Removing nginx docker volume
+  docker_volume:
+    name: '{{ nginx_docker_volume_name }}'
+    state: absent
+  tags:
+    - undeploy
+
+- name: Creating nginx docker volume
+  docker_volume:
+    name: '{{ nginx_docker_volume_name }}'
+    state: present
+  tags:
+    - deploy
+
+- name: Launching nginx reverse proxy container
+  docker_container:
+    image: nginx:stable-alpine
+    volumes:
+      - '{{ nginx_docker_volume_name }}:/etc/nginx/conf.d'
+      - '{{ nextcloud_system_directory }}/system:/var/www/html:ro'
+      - '{{ nextcloud_data_directory }}/data:/var/www/html/data:ro'
+    networks:
+      - name: '{{ nginx_network }}'
+    network_mode: bridge
+    purge_networks: true
+    restart_policy: "{{ 'no' if not nginx_on_boot | bool else 'always' }}"
+    ports:
+      - 80:80
+    name: '{{ nginx_container_name }}'
+    state: started
+  tags:
+    - deploy

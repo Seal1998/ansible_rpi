@@ -1,0 +1,163 @@
+- hosts: '{{ target }}'
+  tasks:
+    - name: Stopping systemd semaphore service
+      systemd:
+        name: semaphore
+        state: stopped
+      ignore_errors: true
+      tags:
+        - undeploy
+
+    - name: Adding semaphore user
+      user:
+        name: semaphore
+        generate_ssh_key: true
+        home: '{{ semaphore_home }}'
+        shell: /bin/false
+        state: present
+      tags:
+        - deploy
+
+    - name: Removing semaphore user
+      user:
+        name: semaphore
+        remove: true
+        state: absent
+      tags:
+        - undeploy
+
+    - name: Downloading semaphore latest archive for arm64
+      get_url:
+        dest: '{{ semaphore_home }}/semaphore.tar.gz'
+        url: 'https://github.com/ansible-semaphore/semaphore/releases/download/v{{ semaphore_version }}/semaphore_{{ semaphore_version }}_linux_arm64.tar.gz'
+        owner: semaphore
+        group: semaphore
+      tags:
+        - deploy
+        
+    - name: Unarchive semaphore archive
+      unarchive:
+        remote_src: true
+        src: '{{ semaphore_home }}/semaphore.tar.gz'
+        dest: '{{ semaphore_home }}'
+        owner: semaphore
+        group: semaphore
+      tags:
+        - deploy
+
+    - name: Removing semaphore.tar.gz
+      file:
+        path: '{{ semaphore_home }}/semaphore.tar.gz'
+        state: absent
+      tags:
+        - deploy
+
+    - name: Creating needed dirs
+      file:
+        path: '{{ item }}'
+        state: directory
+        owner: semaphore
+        group: semaphore
+      with_items:
+        - '{{ semaphore_home }}/tmp'
+      tags:
+        - deploy
+
+    - include_role:
+        name: docker_get_container_ip
+      vars:
+        container_name: '{{ mariadb_container_name }}'
+        write_to: mariadb_address
+      tags: 
+        - deploy
+        - undeploy
+
+    - name: Setting up user and database
+      block:
+        - mysql_query:
+            login_host: '{{ mariadb_address }}'
+            login_user: root
+            login_password: '{{ mariadb_root_user_password }}'
+            login_port: 3306
+            query: '{{ item }}'
+          with_items:
+            - "CREATE DATABASE {{ semaphore_mysql_database }}"
+            - "GRANT ALL PRIVILEGES ON semaphore.* TO '{{ semaphore_mysql_user }}'@'%' IDENTIFIED BY '{{ semaphore_mysql_password }}'"
+            - 'FLUSH PRIVILEGES'
+      ignore_errors: true
+      tags:
+        - deploy
+
+    - name: Remove user and database
+      block:
+        - mysql_db:
+            login_host: '{{ mariadb_address }}'
+            login_user: root
+            login_password: '{{ mariadb_root_user_password }}'
+            login_port: 3306
+            name: semaphore
+            state: absent
+
+        - mysql_user:
+            login_host: '{{ mariadb_address }}'
+            login_user: root
+            login_password: '{{ mariadb_root_user_password }}'
+            login_port: 3306
+            name: semaphore_user
+            state: absent
+      tags:
+        - undeploy
+
+    - name: Templating config
+      template:
+        src: '../templates/semaphore/config.json.j2'
+        dest: '{{ semaphore_home }}/config.json'
+        owner: semaphore
+        group: semaphore
+      tags:
+        - deploy
+
+    - name: Templating systemd service
+      template:
+        src: '../templates/semaphore/semaphore.service.j2'
+        dest: '/etc/systemd/system/semaphore.service'
+      tags:
+        - deploy
+
+    - name: Removing systemd service
+      file:
+        path: '/etc/systemd/system/semaphore.service'
+        state: absent
+      tags:
+        - undeploy
+
+    - name: Daemon reload
+      systemd:
+        daemon_reload: true
+      tags:
+        - always
+
+    - name: Launching semaphore service
+      systemd:
+        name: semaphore
+        enabled: true
+        state: started
+      tags:
+        - deploy
+
+    - name: Waiting for db migration
+      pause:
+        seconds: 10
+      tags:
+        - deploy
+
+    - name: Setting up semaphore user
+      mysql_query:
+        login_host: '{{ mariadb_address }}'
+        login_user: root
+        login_password: '{{ mariadb_root_user_password }}'
+        login_port: 3306
+        login_db: '{{ semaphore_mysql_database }}'
+        query: "INSERT INTO user VALUES ('0', '{{ ansible_date_time.date }} {{ ansible_date_time.time }}', '{{ semaphore_default_user.name }}', '{{ semaphore_default_user.name }}', '', '{{ semaphore_default_user.password | string | password_hash('bcrypt') }}', '1', '0', '0')"
+      tags:
+        - deploy

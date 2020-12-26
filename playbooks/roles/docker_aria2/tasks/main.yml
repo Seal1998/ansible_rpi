@@ -1,0 +1,97 @@
+- name: Stopping and removing existing aria2 backend container
+  docker_container:
+    name: '{{ aria2_backend_container_name }}'
+    state: absent
+  tags:
+    - deploy
+    - undeploy
+
+- name: Removing old docker volume for configs
+  docker_volume:
+    name: '{{ aria2_configs_docker_volume_name }}'
+    state: absent
+  tags:
+    - undeploy
+
+- name: Creating docker volume for configs
+  docker_volume:
+    name: '{{ aria2_configs_docker_volume_name }}'
+    state: present
+  tags:
+    - deploy
+
+- name: Creating aria2 data dir
+  file:
+    path: '{{ aria2_data_directory }}'
+    state: directory
+  tags:
+    - deploy
+
+- name: Removing aria2 data dir
+  file:
+    path: '{{ aria2_data_directory }}'
+    state: absent
+  tags:
+    - undeploy
+
+- name: Pulling aria2 image
+  docker_image:
+    name: p3terx/aria2-pro:latest
+  tags:
+    - deploy
+
+- name: Purge undefined aria2_network
+  set_fact:
+    aria2_network: false
+  when: aria2_network is undefined
+  tags:
+    - deploy
+
+- name: Launching aria2 backend container
+  docker_container:
+    image: p3terx/aria2-pro
+    name: '{{ aria2_backend_container_name }}'
+    networks:
+      - name: "{{ 'bridge' if not aria2_network else aria2_network }}"
+    volumes:
+      - '{{ aria2_data_directory }}:/downloads'
+      - '{{ aria2_configs_docker_volume_name }}:/config'
+    purge_networks: true
+    restart_policy: "{{ 'no' if not aria2_on_boot | bool else 'always' }}"
+    env:
+      PUID: '33'
+      GUID: '33'
+#      UMASK_SET: 02
+      RPC_SECRET: '12345'
+      RPC_PORT: '6800'
+    published_ports:
+      - "6800:6800"
+  tags:
+    - deploy
+
+- name: Stopping and removing existing aria2 frontend container
+  docker_container:
+    name: '{{ aria2_frontend_container_name }}'
+    state: absent
+  tags:
+    - deploy
+    - undeploy
+
+- name: Pulling aria2 frontend image
+  docker_image:
+    name: p3terx/ariang:latest
+  tags:
+    - deploy
+
+- name: Launching aria2 frontend container
+  docker_container:
+    image: p3terx/ariang
+    name: '{{ aria2_frontend_container_name }}'
+    networks:
+      - name: "{{ 'bridge' if not aria2_network else aria2_network }}"
+    purge_networks: true
+    restart_policy: "{{ 'no' if not aria2_on_boot | bool else 'always' }}"
+    published_ports:
+      - "6880:6880"
+  tags:
+    - deploy

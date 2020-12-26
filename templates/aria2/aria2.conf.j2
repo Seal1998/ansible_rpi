@@ -1,0 +1,13 @@
+enable-rpc=true 
+rpc-allow-origin-all=true
+continue=true
+daemon=true
+log=/var/log/aria2c/aria2c.log 
+check-certificate=false 
+save-session=/var/local/aria2c/aria2c.sess 
+save-session-interval=2 
+input-file=/var/local/aria2c/aria2c.sess 
+rpc-save-upload-metadata=true 
+force-save=true 
+log-level=warn 
+rpc-secret={{ aria2_rpc_secret }}

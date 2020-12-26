@@ -1,0 +1,14 @@
+
+[Unit]
+Description=Ansible Semaphore
+Requires=network.target
+
+[Service]
+ExecStart={{ semaphore_home }}/semaphore -config {{ semaphore_home }}/config.json
+User=semaphore
+Group=semaphore
+Restart=always
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target

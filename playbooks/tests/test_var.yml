@@ -1,0 +1,6 @@
+- hosts: localhost
+  vars:
+    test_var: '1'
+  tasks:
+    - debug:
+        msg: "{{ 'OK' if test_var == 1' | '2' | '3' else 'ERROR' }}"

@@ -1,0 +1,191 @@
+- hosts: '{{ target }}'
+
+  tasks:
+    - name: Ensuring docker is running and enabled
+      systemd:
+        name: docker
+        state: started
+        enabled: true
+      tags:
+        - deploy
+
+    - name: Stopping and removing existing nextcloud container
+      docker_container:
+        name: '{{ docker_config.nextcloud_fpm_container_name }}'
+        state: absent
+      tags:
+        - deploy
+        - undeploy
+
+    - name: Nextcloud update block
+      block:
+      - name: Removing nextcloud image
+        docker_image:
+          name: nextcloud
+          repository: nextcloud:fpm
+          state: absent
+      - name: Downloading nextcloud image
+        docker_image:
+          name: nextcloud
+          repository: nextcloud:fpm
+          state: present
+      tags:
+        - nextcloud-update
+        - never
+
+    - name: Creating {{ nginx_docker_volume_name }} docker volume for nginx configuration
+      docker_volume:
+        name: '{{ nginx_docker_volume_name }}'
+        state: present
+      tags:
+        - deploy
+
+    - name: Creating {{ docker_config.nextcloud_fpm_volume_name }} docker volume for nextcloud configuration
+      docker_volume:
+        name: '{{ docker_config.nextcloud_fpm_volume_name }}'
+        state: present
+      tags:
+        - deploy
+
+    - name: Removing {{ docker_config.nextcloud_fpm_volume_name }} docker volume for nextcloud configuration
+      docker_volume:
+        name: '{{ docker_config.nextcloud_fpm_volume_name }}'
+        state: absent
+      tags:
+        - undeploy
+
+    - name: Copy nginx config to the {{ nginx_docker_volume_name }} docker volume
+      template:
+        src: '../templates/nextcloud/{{ nginx_config_name }}'
+        dest: '/var/lib/docker/volumes/{{ nginx_docker_volume_name }}/_data/{{ nginx_config_name }}'
+        mode: 0644
+      tags:
+        - deploy
+
+    - name: Copy nextcloud php-fpm www pool config to the {{ docker_config.nextcloud_fpm_volume_name }} docker volume
+      copy:
+        src: '../templates/nextcloud/www-pool.conf'
+        dest: '/var/lib/docker/volumes/{{ docker_config.nextcloud_fpm_volume_name }}/_data/www.conf'
+        mode: 0644
+      tags:
+        - deploy
+
+    - name: Creating {{ docker_config.network_name }} docker network
+      docker_network:
+        name: '{{ docker_config.network_name }}'
+        state: present
+      tags:
+        - deploy
+
+    - name: Ensuring that nextcloud dirs exists or absent (if undeploy)
+      file:
+        path: '{{ item }}'
+        state: "{{ 'directory' if 'undeploy' not in ansible_run_tags else 'absent'}}"
+        owner: www-data
+        group: www-data
+        mode: 0755
+      with_items:
+        - '{{ nextcloud_data_directory }}'
+        - '{{ nextcloud_system_directory }}'
+        - '{{ nextcloud_data_directory }}/data'
+        - '{{ nextcloud_system_directory }}/system'
+        - '{{ nextcloud_system_directory }}/system/data'
+      tags:
+        - deploy
+        - undeploy
+
+    - include_role:
+        name: docker_nginx
+      vars:
+        nginx_network: '{{ docker_config.network_name }}'
+      tags:
+        - nginx
+
+    - include_role:
+        name: docker_mariadb
+      vars:
+        mariadb_network: '{{ docker_config.network_name }}'
+      tags:
+        - mariadb
+
+    - name: Waiting for mariadb startup
+      pause:
+        seconds: 15
+      tags:
+        - mariadb
+
+    - include_role:
+        name: docker_get_container_ip
+      vars:
+        container_name: '{{ mariadb_container_name }}'
+        write_to: mariadb_address
+      tags:
+        - mariadb
+
+# if mariadb undeployed - can`t get IP
+
+    - name: Setting up user and database
+      block:
+        - mysql_db:
+            login_host: '{{ mariadb_address }}'
+            login_user: root
+            login_password: '{{ mariadb_root_user_password }}'
+            login_port: 3306
+            name: nextcloud
+            state: absent
+
+        - mysql_user:
+            login_host: '{{ mariadb_address }}'
+            login_user: root
+            login_password: '{{ mariadb_root_user_password }}'
+            login_port: 3306
+            name: nextcloud_user
+            password: '{{ mysql_nextcloud_password }}'
+            state: absent
+            update_password: on_create
+      tags:
+        - mysql_flash
+
+    - name: Setting up user and database
+      block:
+        - mysql_query:
+            login_host: '{{ mariadb_address }}'
+            login_user: root
+            login_password: '{{ mariadb_root_user_password }}'
+            login_port: 3306
+            query: '{{ item }}'
+          with_items:
+            - "GRANT ALL PRIVILEGES ON nextcloud.* TO 'nextcloud_user'@'%' IDENTIFIED BY '{{ mysql_nextcloud_password }}'"
+            - 'FLUSH PRIVILEGES'
+      tags:
+        - mariadb
+        - mysql_init
+
+    - name: Setting nextcloud volumes to mount
+      set_fact:
+        nextcloud_volumes:
+          - '/var/lib/docker/volumes/{{ docker_config.nextcloud_fpm_volume_name }}/_data/www.conf:/usr/local/etc/php-fpm.d/www.conf' #php-fpm pool
+          - '{{ nextcloud_system_directory }}/system:/var/www/html'
+          - '{{ nextcloud_data_directory }}/data:/var/www/html/data'
+      tags:
+        - deploy
+
+    - name: Adding aira2 to nextcloud mounts
+      set_fact:
+        nextcloud_volumes: '{{ nextcloud_volumes + [aria2_data_directory:/var/www/html/data/AriaDownloads/files/AriaDownloads }}'
+      tags:
+        - aria2_configured
+
+    - name: Launching nextcloud fpm container
+      docker_container:
+        image: nextcloud:fpm
+        volumes: '{{ nextcloud_volumes }}'
+        networks:
+          - name: '{{ docker_config.network_name }}'
+        network_mode: bridge
+        purge_networks: true
+        restart_policy: "{{ 'no' if not nextcloud_on_boot | bool else 'always' }}"
+        name: '{{ docker_config.nextcloud_fpm_container_name }}'
+        state: started
+      tags:
+        - deploy

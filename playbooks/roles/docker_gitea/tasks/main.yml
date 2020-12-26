@@ -1,0 +1,107 @@
+- name: Stopping and removing existing gitea container
+  docker_container:
+    name: '{{ gitea_container_name }}'
+    state: absent
+  tags:
+    - deploy
+    - undeploy
+
+- name: Creating gitea data dir
+  file:
+    path: '{{ gitea_data_directory }}'
+    state: directory
+  tags:
+    - deploy
+
+- name: Removing gitea data dir
+  file:
+    path: '{{ gitea_data_directory }}'
+    state: absent
+  tags:
+    - undeploy
+
+- name: Pulling gitea image
+  docker_image:
+    name: gitea/gitea:latest
+  tags:
+    - deploy
+
+- name: Creating {{ gitea_network }} docker network
+  docker_network:
+    name: '{{ gitea_network }}'
+    state: present
+  tags:
+    - deploy
+
+- name: Purge undefined gitea_network
+  set_fact:
+    gitea_network: false
+  when: gitea_network is undefined
+  tags:
+    - deploy
+
+- include_role:
+    name: docker_get_container_ip
+  vars:
+    container_name: '{{ mariadb_container_name }}'
+    write_to: mariadb_address
+  tags: 
+    - deploy
+    - undeploy
+
+- name: Setting up user and database
+  block:
+    - mysql_query:
+        login_host: '{{ mariadb_address }}'
+        login_user: root
+        login_password: '{{ mariadb_root_user_password }}'
+        login_port: 3306
+        query: '{{ item }}'
+      with_items:
+        - "CREATE DATABASE {{ gitea_mysql_database }}"
+        - "GRANT ALL PRIVILEGES ON {{ gitea_mysql_database }}.* TO '{{ gitea_mysql_user }}'@'%' IDENTIFIED BY '{{ gitea_mysql_password }}'"
+        - 'FLUSH PRIVILEGES'
+  ignore_errors: true
+  tags:
+    - deploy
+
+- name: Remove user and database
+  block:
+    - mysql_db:
+        login_host: '{{ mariadb_address }}'
+        login_user: root
+        login_password: '{{ mariadb_root_user_password }}'
+        login_port: 3306
+        name: '{{ gitea_mysql_database }}'
+        state: absent
+
+    - mysql_user:
+        login_host: '{{ mariadb_address }}'
+        login_user: root
+        login_password: '{{ mariadb_root_user_password }}'
+        login_port: 3306
+        name: '{{ gitea_mysql_user }}'
+        state: absent
+  tags:
+    - undeploy
+
+- name: Launching gitea container
+  docker_container:
+    image: gitea/gitea
+    name: '{{ gitea_container_name }}'
+    networks:
+      - name: "{{ 'bridge' if not gitea_network else gitea_network }}"
+    volumes:
+      - '{{ gitea_data_directory }}:/data'
+    purge_networks: true
+    restart_policy: "{{ 'no' if not gitea_on_boot | bool else 'always' }}"
+    published_ports:
+      - '3001:3000'
+    env:
+      DB_TYPE: mysql
+      DB_HOST: '{{ mariadb_container_name }}:3306'
+      DB_NAME: '{{ gitea_mysql_database }}'
+      DB_USER: '{{ gitea_mysql_user }}'
+      DB_PASSWD: '{{ gitea_mysql_password | string }}'
+  tags:
+    - deploy

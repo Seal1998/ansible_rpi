@@ -1,0 +1,9 @@
+- hosts: '{{ target }}'
+
+  tasks:
+    - include_role:
+        name: docker_mariadb
+      vars:
+        mariadb_network: '{{ docker_config.network_name }}'
+      tags:
+        - always

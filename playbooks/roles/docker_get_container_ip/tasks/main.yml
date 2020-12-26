@@ -1,0 +1,9 @@
+- name: 'Getting IP of {{ container_name }} container'
+  block:
+    - docker_container_info:
+        name: '{{ container_name }}'
+      register: result
+
+    - set_fact: { '{{ write_to }}': '{{ result.container.NetworkSettings.Networks[docker_config.network_name].IPAddress }}'}
+  tags:
+    - always

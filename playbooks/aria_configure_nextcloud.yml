@@ -1,0 +1,39 @@
+- hosts: '{{ target }}'
+  tasks:
+    - name: Ensuring docker is running and enabled
+      systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - include_role:
+        name: docker_aria2
+      vars:
+        aria2_network: '{{ docker_config.network_name }}'
+
+    - name: Adding AriaDownloads user
+      shell:
+        cmd: 'docker exec --user www-data {{ docker_config.nextcloud_fpm_container_name }} /bin/bash -c "OC_PASS={{ aria2_nextcloud_pass }} php occ user:add --password-from-env AriaDownloads"'
+
+    - name: Stopping and removing existing container
+      docker_container:
+        name: '{{ item }}'
+        state: absent
+      with_items:
+        - '{{ docker_config.nextcloud_fpm_container_name }}'
+
+    - name: Launching nextcloud fpm container
+      docker_container:
+        image: nextcloud:fpm
+        volumes:
+          - '/var/lib/docker/volumes/{{ docker_config.nextcloud_fpm_volume_name }}/_data/www.conf:/usr/local/etc/php-fpm.d/www.conf' #php-fpm pool
+          - '{{ nextcloud_system_directory }}/system:/var/www/html'
+          - '{{ nextcloud_data_directory }}/data:/var/www/html/data'
+          - '{{ aria2_data_directory }}:/var/www/html/data/AriaDownloads/files/AriaDownloads'
+        networks:
+          - name: '{{ docker_config.network_name }}'
+        network_mode: bridge
+        purge_networks: true
+        restart_policy: "{{ 'no' if not nextcloud_on_boot | bool else 'always' }}"
+        name: '{{ docker_config.nextcloud_fpm_container_name }}'
+        state: started

@@ -1,0 +1,56 @@
+- name: Stopping and removing existing mariadb container
+  docker_container:
+    name: '{{ mariadb_container_name }}'
+    state: absent
+  tags:
+    - deploy
+    - undeploy
+
+- name: Creating mariadb data dir
+  file:
+    path: '{{ mariadb_data_directory }}'
+    state: directory
+  tags:
+    - deploy
+
+- name: Removing mariadb data dir
+  file:
+    path: '{{ mariadb_data_directory }}'
+    state: absent
+  tags:
+    - undeploy
+
+- name: Pulling mariadb image
+  docker_image:
+    name: mariadb:latest
+  tags:
+    - deploy
+
+- name: Creating {{ mariadb_network }} docker network
+  docker_network:
+    name: '{{ mariadb_network }}'
+    state: present
+  tags:
+    - deploy
+
+- name: Purge undefined mariadb_network
+  set_fact:
+    mariadb_network: false
+  when: mariadb_network is undefined
+  tags:
+    - deploy
+
+- name: Launching mariadb container
+  docker_container:
+    image: mariadb
+    name: '{{ mariadb_container_name }}'
+    networks:
+      - name: "{{ 'bridge' if not mariadb_network else mariadb_network }}"
+    volumes:
+      - '{{ mariadb_data_directory }}:/var/lib/mysql'
+    purge_networks: true
+    restart_policy: "{{ 'no' if not mariadb_on_boot | bool else 'always' }}"
+    env:
+      MYSQL_ROOT_PASSWORD: '{{ mariadb_root_user_password }}'
+  tags:
+    - deploy
