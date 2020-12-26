@@ -29,7 +29,7 @@
           - '/var/lib/docker/volumes/{{ docker_config.nextcloud_fpm_volume_name }}/_data/www.conf:/usr/local/etc/php-fpm.d/www.conf' #php-fpm pool
           - '{{ nextcloud_system_directory }}/system:/var/www/html'
           - '{{ nextcloud_data_directory }}/data:/var/www/html/data'
-          - '{{ aria2_data_directory }}:/var/www/html/data/AriaDownloads/files/AriaDownloads'
+          - '{{ aria2_data_directory }}:/var/www/html/data/AriaDownloads/files'
         networks:
           - name: '{{ docker_config.network_name }}'
         network_mode: bridge

@@ -137,6 +137,14 @@
       tags:
         - always
 
+    - name: Adding semaphore to the docker group
+      user:
+        name: semaphore
+        groups:
+          - 'docker'
+      tags:
+        - docker
+
     - name: Launching semaphore service
       systemd:
         name: semaphore
